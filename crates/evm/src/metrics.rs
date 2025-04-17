@@ -5,12 +5,13 @@
 use crate::{execute::Executor, Database, OnStateHook};
 use alloy_consensus::BlockHeader;
 use alloy_evm::block::StateChangeSource;
-use metrics::{Counter, Gauge, Histogram};
+use metrics::{Counter, Gauge, Histogram, describe_histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use revm::state::EvmState;
 use std::time::Instant;
+use once_cell::sync::Lazy;
 
 /// Wrapper struct that combines metrics and state hook
 struct MeteredStateHook {
@@ -210,11 +211,16 @@ mod tests {
         }
     }
 
+    /// Helper to set up a test metrics recorder
     fn setup_test_recorder() -> Snapshotter {
-        let recorder = DebuggingRecorder::new();
-        let snapshotter = recorder.snapshotter();
-        recorder.install().unwrap();
-        snapshotter
+        static RECORDER: Lazy<Snapshotter> = Lazy::new(|| {
+            let recorder = DebuggingRecorder::new();
+            let snapshotter = recorder.snapshotter();
+            let _ = recorder.install();
+            snapshotter
+        });
+        
+        RECORDER.clone()
     }
 
     #[test]
@@ -237,7 +243,7 @@ mod tests {
                     info: AccountInfo {
                         balance: U256::from(100),
                         nonce: 10,
-                        code_hash: B256::random(),
+                        code_hash: B256::ZERO,
                         code: Default::default(),
                     },
                     storage,
@@ -283,5 +289,93 @@ mod tests {
 
         let actual_output = rx.try_recv().unwrap();
         assert_eq!(actual_output, expected_output);
+    }
+}
+
+/// Metrics for EVM execution.
+#[derive(Metrics)]
+#[metrics(scope = "evm")]
+pub struct EvmMetrics {
+    /// Histogram measuring transaction execution time in milliseconds.
+    pub transaction_execution_time: Histogram,
+}
+
+/// Get a reference to the EVM metrics singleton.
+pub fn evm_metrics() -> &'static EvmMetrics {
+    static METRICS: Lazy<EvmMetrics> = Lazy::new(|| {
+        // Describe the histogram for better documentation in metrics output
+        describe_histogram!(
+            "evm.transaction_execution_time", 
+            "Time taken to execute a single transaction in milliseconds"
+        );
+        
+        // Create the metrics instance - the Metrics derive macro handles registration
+        EvmMetrics::default()
+    });
+    &METRICS
+}
+
+/// Helper struct to measure and record transaction execution time.
+#[derive(Debug)]
+pub struct TimingHelper {
+    start: std::time::Instant,
+}
+
+impl TimingHelper {
+    /// Create a new timing helper and start the timer.
+    pub fn start() -> Self {
+        Self {
+            start: std::time::Instant::now(),
+        }
+    }
+
+    /// Record the elapsed time to metrics and return the elapsed time in milliseconds.
+    pub fn stop(self) -> f64 {
+        let elapsed = self.start.elapsed();
+        let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+        
+        // Record to metrics
+        evm_metrics().transaction_execution_time.record(elapsed_ms);
+        
+        elapsed_ms
+    }
+}
+
+#[cfg(test)]
+mod evm_metrics_tests {
+    use super::*;
+    use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
+    use std::time::Duration;
+    
+    /// Helper to set up a test metrics recorder
+    fn setup_test_recorder() -> Snapshotter {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let _ = recorder.install();
+        snapshotter
+    }
+    
+    #[test]
+    fn test_metrics_creation() {
+        // Just make sure metrics can be created without errors
+        let _metrics = evm_metrics();
+    }
+    
+    #[test]
+    fn test_timing_helper() {
+        // Set up metrics recording
+        let _recorder = setup_test_recorder();
+        
+        // Create a timing helper
+        let timer = TimingHelper::start();
+        
+        // Simulate some work
+        std::thread::sleep(Duration::from_millis(10));
+        
+        // Record the timing
+        let elapsed_ms = timer.stop();
+        
+        // Verify timing is reasonable
+        assert!(elapsed_ms >= 5.0, "Elapsed time should be at least 5ms, got {elapsed_ms}ms");
     }
 }
