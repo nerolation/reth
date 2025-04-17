@@ -37,6 +37,7 @@ mod aliases;
 pub use aliases::*;
 
 #[cfg(feature = "metrics")]
+/// Metrics for EVM execution, including transaction execution timing.
 pub mod metrics;
 pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]

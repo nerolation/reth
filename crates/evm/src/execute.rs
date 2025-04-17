@@ -351,9 +351,25 @@ where
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&ExecutionResult<<F::EvmFactory as EvmFactory>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
+        #[cfg(feature = "metrics")]
+        let timer = crate::metrics::TimingHelper::start();
+
         let gas_used =
             self.executor.execute_transaction_with_result_closure(tx.as_executable(), f)?;
         self.transactions.push(tx.into_recovered());
+
+        #[cfg(feature = "metrics")]
+        {
+            let elapsed_ms = timer.stop();
+            tracing::trace!(
+                target: "evm::transaction",
+                tx_hash = ?self.transactions.last().unwrap(),
+                elapsed_ms = elapsed_ms,
+                gas_used = gas_used,
+                "Transaction executed"
+            );
+        }
+
         Ok(gas_used)
     }
 
