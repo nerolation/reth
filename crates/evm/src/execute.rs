@@ -23,6 +23,12 @@ use revm::{
     context::result::ExecutionResult,
     database::{states::bundle_state::BundleRetention, BundleState, State},
 };
+use tracing::info;
+#[cfg(feature = "metrics")]
+use crate::metrics::ExecutorMetrics;
+use std::hash::Hash;
+use alloy_primitives::Address;
+use reth_primitives_traits::SignedTransaction;
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -289,6 +295,7 @@ where
     pub(crate) ctx: F::ExecutionCtx<'a>,
     pub(crate) parent: &'a SealedHeader<HeaderTy<N>>,
     pub(crate) assembler: Builder,
+    pub(crate) metrics: ExecutorMetrics,
 }
 
 /// Conversions for executable transactions.
@@ -325,7 +332,10 @@ impl<Executor: BlockExecutor> ExecutorTx<Executor> for Recovered<Executor::Trans
 impl<'a, F, DB, Executor, Builder, N> BlockBuilder
     for BasicBlockBuilder<'a, F, Executor, Builder, N>
 where
-    F: BlockExecutorFactory<Transaction = N::SignedTx, Receipt = N::Receipt>,
+    F: BlockExecutorFactory,
+    F::Transaction: From<N::SignedTx> + Hash,
+    F::Receipt: From<N::Receipt>,
+    N::SignedTx: SignedTransaction,
     Executor: BlockExecutor<
         Evm: Evm<
             Spec = <F::EvmFactory as EvmFactory>::Spec,
@@ -351,15 +361,30 @@ where
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&ExecutionResult<<F::EvmFactory as EvmFactory>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
-        let gas_used =
-            self.executor.execute_transaction_with_result_closure(tx.as_executable(), f)?;
-        self.transactions.push(tx.into_recovered());
+        let recovered = tx.into_recovered();
+        let tx_hash = recovered.tx_hash();
+        let execute_start = std::time::Instant::now();
+        
+        let gas_used = self.executor.execute_transaction_with_result_closure(&recovered, |result| {
+            let execute_time = execute_start.elapsed().as_millis();
+            let duration_ms = execute_time as f64;
+            self.metrics.reth_executor_tx_exec_seconds.record(duration_ms / 1000.0);
+            info!(
+                target: "sync::stages::execution",
+                tx_hash = format!("{:#x}", tx_hash),
+                execute_time_ms = execute_time,
+                "Transaction executed"
+            );
+            f(result);
+        })?;
+        
+        self.transactions.push(recovered);
         Ok(gas_used)
     }
 
     fn finish(
         self,
-        state: impl StateProvider,
+        state_provider: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
@@ -368,22 +393,33 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // calculate the state root
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
-        let (state_root, trie_updates) = state
+        let hashed_state = state_provider.hashed_post_state(&db.bundle_state);
+        let (state_root, trie_updates) = state_provider
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;
 
-        let (transactions, senders) =
-            self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+        let (transactions, senders): (Vec<F::Transaction>, Vec<Address>) = self
+            .transactions
+            .into_iter()
+            .map(|tx| {
+                let (tx, _) = tx.into_parts();
+                let sender = tx.recover_signer().unwrap_or_default();
+                (tx.into(), sender)
+            })
+            .unzip();
 
         let block = self.assembler.assemble_block(BlockAssemblerInput {
             evm_env,
             execution_ctx: self.ctx,
             parent: self.parent,
             transactions,
-            output: &result,
+            output: &BlockExecutionResult {
+                receipts: result.receipts.clone().into_iter().map(Into::into).collect(),
+                gas_used: result.gas_used,
+                requests: result.requests.clone(),
+            },
             bundle_state: &db.bundle_state,
-            state_provider: &state,
+            state_provider: &state_provider,
             state_root,
         })?;
 

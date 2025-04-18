@@ -53,6 +53,9 @@ pub struct ExecutorMetrics {
     /// The total amount of time it took to execute the latest block.
     pub execution_duration: Gauge,
 
+    /// The Histogram for transaction execution time in seconds.
+    pub reth_executor_tx_exec_seconds: Histogram,
+
     /// The Histogram for number of accounts loaded when executing the latest block.
     pub accounts_loaded_histogram: Histogram,
     /// The Histogram for number of storage slots loaded when executing the latest block.
@@ -237,7 +240,7 @@ mod tests {
                     info: AccountInfo {
                         balance: U256::from(100),
                         nonce: 10,
-                        code_hash: B256::random(),
+                        code_hash: B256::repeat_byte(0xff),
                         code: Default::default(),
                     },
                     storage,
