@@ -14,7 +14,7 @@ pub use reth_execution_errors::{
 use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{
-    Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader, TxTy,
+    Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader, SignedTransaction, TxTy,
 };
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
@@ -23,6 +23,11 @@ use revm::{
     context::result::ExecutionResult,
     database::{states::bundle_state::BundleRetention, BundleState, State},
 };
+
+#[cfg(feature = "metrics")]
+use crate::metrics::{TransactionMetrics, TransactionMetricsWithCsv};
+#[cfg(feature = "metrics")]
+use std::time::Instant;
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -478,9 +483,76 @@ where
         let mut strategy = self.strategy_factory.executor_for_block(&mut self.db, block);
 
         strategy.apply_pre_execution_changes()?;
+
+        // Process transactions with or without metrics
+        #[cfg(feature = "metrics")]
+        {
+            // Check if CSV export is enabled via environment variable
+            if let Ok(csv_path) = std::env::var("RETH_TX_METRICS_CSV") {
+                // Use CSV metrics if environment variable is set
+                let csv_metrics = TransactionMetricsWithCsv::new(csv_path);
+                for tx in block.transactions_recovered() {
+                    let tx_hash = tx.tx_hash();
+                    csv_metrics.measure_transaction(*tx_hash, || {
+                        // Start IO timing - this includes all non-EVM operations
+                        let io_start = Instant::now();
+                        
+                        // Save transaction to the executor before execution
+                        let pre_execution_io_time = io_start.elapsed().as_millis() as u64;
+                        
+                        // Start EVM execution timing
+                        let evm_start = Instant::now();
+                        
+                        // Execute the transaction and capture the result
+                        let result = strategy.execute_transaction(tx.clone());
+                        
+                        // Record EVM execution time
+                        let evm_time = evm_start.elapsed().as_millis() as u64;
+                        
+                        // Compute total I/O time (everything except the EVM execution)
+                        let total_time = io_start.elapsed().as_millis() as u64;
+                        let io_time = total_time - evm_time + pre_execution_io_time;
+                        
+                        (result, io_time, evm_time)
+                    })?;
+                }
+            } else {
+                // Use standard metrics without CSV export
+                let metrics = TransactionMetrics::new_default();
+                for tx in block.transactions_recovered() {
+                    let tx_hash = tx.tx_hash();
+                    metrics.measure_transaction(*tx_hash, || {
+                        // Start IO timing - this includes all non-EVM operations
+                        let io_start = Instant::now();
+                        
+                        // Save transaction to the executor before execution
+                        let pre_execution_io_time = io_start.elapsed().as_millis() as u64;
+                        
+                        // Start EVM execution timing
+                        let evm_start = Instant::now();
+                        
+                        // Execute the transaction and capture the result
+                        let result = strategy.execute_transaction(tx.clone());
+                        
+                        // Record EVM execution time
+                        let evm_time = evm_start.elapsed().as_millis() as u64;
+                        
+                        // Compute total I/O time (everything except the EVM execution)
+                        let total_time = io_start.elapsed().as_millis() as u64;
+                        let io_time = total_time - evm_time + pre_execution_io_time;
+                        
+                        (result, io_time, evm_time)
+                    })?;
+                }
+            }
+        }
+
+        // If metrics are not enabled, just execute transactions normally
+        #[cfg(not(feature = "metrics"))]
         for tx in block.transactions_recovered() {
             strategy.execute_transaction(tx)?;
         }
+        
         let result = strategy.apply_post_execution_changes()?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
@@ -502,9 +574,76 @@ where
             .with_state_hook(Some(Box::new(state_hook)));
 
         strategy.apply_pre_execution_changes()?;
+
+        // Process transactions with or without metrics
+        #[cfg(feature = "metrics")]
+        {
+            // Check if CSV export is enabled via environment variable
+            if let Ok(csv_path) = std::env::var("RETH_TX_METRICS_CSV") {
+                // Use CSV metrics if environment variable is set
+                let csv_metrics = TransactionMetricsWithCsv::new(csv_path);
+                for tx in block.transactions_recovered() {
+                    let tx_hash = tx.tx_hash();
+                    csv_metrics.measure_transaction(*tx_hash, || {
+                        // Start IO timing - this includes all non-EVM operations
+                        let io_start = Instant::now();
+                        
+                        // Save transaction to the executor before execution
+                        let pre_execution_io_time = io_start.elapsed().as_millis() as u64;
+                        
+                        // Start EVM execution timing
+                        let evm_start = Instant::now();
+                        
+                        // Execute the transaction and capture the result
+                        let result = strategy.execute_transaction(tx.clone());
+                        
+                        // Record EVM execution time
+                        let evm_time = evm_start.elapsed().as_millis() as u64;
+                        
+                        // Compute total I/O time (everything except the EVM execution)
+                        let total_time = io_start.elapsed().as_millis() as u64;
+                        let io_time = total_time - evm_time + pre_execution_io_time;
+                        
+                        (result, io_time, evm_time)
+                    })?;
+                }
+            } else {
+                // Use standard metrics without CSV export
+                let metrics = TransactionMetrics::new_default();
+                for tx in block.transactions_recovered() {
+                    let tx_hash = tx.tx_hash();
+                    metrics.measure_transaction(*tx_hash, || {
+                        // Start IO timing - this includes all non-EVM operations
+                        let io_start = Instant::now();
+                        
+                        // Save transaction to the executor before execution
+                        let pre_execution_io_time = io_start.elapsed().as_millis() as u64;
+                        
+                        // Start EVM execution timing
+                        let evm_start = Instant::now();
+                        
+                        // Execute the transaction and capture the result
+                        let result = strategy.execute_transaction(tx.clone());
+                        
+                        // Record EVM execution time
+                        let evm_time = evm_start.elapsed().as_millis() as u64;
+                        
+                        // Compute total I/O time (everything except the EVM execution)
+                        let total_time = io_start.elapsed().as_millis() as u64;
+                        let io_time = total_time - evm_time + pre_execution_io_time;
+                        
+                        (result, io_time, evm_time)
+                    })?;
+                }
+            }
+        }
+
+        // If metrics are not enabled, just execute transactions normally
+        #[cfg(not(feature = "metrics"))]
         for tx in block.transactions_recovered() {
             strategy.execute_transaction(tx)?;
         }
+        
         let result = strategy.apply_post_execution_changes()?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
