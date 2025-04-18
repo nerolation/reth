@@ -144,22 +144,19 @@ impl ExecutorMetrics {
 /// Provides detailed timing information about each transaction's execution,
 /// breaking down the time spent on I/O operations versus actual EVM execution.
 #[derive(Metrics, Clone)]
-#[metrics(scope = "tx.execution")]
+#[metrics(scope = "tx")]
 pub struct TransactionMetrics {
     /// Histogram of transaction execution times (including both I/O and EVM) in milliseconds
-    pub transaction_execution_time_histogram: Histogram,
+    pub transaction_execution_time: Histogram,
     
     /// Histogram of transaction I/O times in milliseconds (database reads/writes)
-    pub transaction_io_time_histogram: Histogram,
+    pub transaction_io_time: Histogram,
     
     /// Histogram of transaction EVM execution times in milliseconds (computational work)
-    pub transaction_evm_time_histogram: Histogram,
+    pub transaction_evm_time: Histogram,
     
     /// Counter for total number of transactions processed
     pub transactions_processed_total: Counter,
-    
-    /// Latest transaction hash processed (for correlation with other metrics)
-    pub latest_transaction_hash: Gauge,
 }
 
 /// A wrapper around TransactionMetrics that adds CSV export functionality
@@ -176,11 +173,10 @@ impl TransactionMetrics {
     /// Creates a new instance of TransactionMetrics with default settings
     pub fn new_default() -> Self {
         Self {
-            transaction_execution_time_histogram: Histogram::noop(),
-            transaction_io_time_histogram: Histogram::noop(),
-            transaction_evm_time_histogram: Histogram::noop(),
+            transaction_execution_time: Histogram::noop(),
+            transaction_io_time: Histogram::noop(),
+            transaction_evm_time: Histogram::noop(),
             transactions_processed_total: Counter::noop(),
-            latest_transaction_hash: Gauge::noop(),
         }
     }
 
@@ -207,19 +203,11 @@ impl TransactionMetrics {
         // Calculate total execution time in milliseconds
         let total_time_ms = start_time.elapsed().as_millis() as u64;
         
-        // Record metrics
-        self.transaction_execution_time_histogram.record(total_time_ms as f64);
-        self.transaction_io_time_histogram.record(io_time_ms as f64);
-        self.transaction_evm_time_histogram.record(evm_time_ms as f64);
+        // Record the metrics with labels
+        self.transaction_execution_time.record(total_time_ms as f64);
+        self.transaction_io_time.record(io_time_ms as f64);
+        self.transaction_evm_time.record(evm_time_ms as f64);
         self.transactions_processed_total.increment(1);
-        
-        // Set the latest transaction hash (convert to u64 for gauge)
-        // Using the first 8 bytes as a simple representation
-        let tx_hash_gauge_value = u64::from_be_bytes([
-            tx_hash.0[0], tx_hash.0[1], tx_hash.0[2], tx_hash.0[3],
-            tx_hash.0[4], tx_hash.0[5], tx_hash.0[6], tx_hash.0[7],
-        ]) as f64;
-        self.latest_transaction_hash.set(tx_hash_gauge_value);
         
         // Log the transaction timing information
         tracing::debug!(
@@ -267,19 +255,11 @@ impl TransactionMetricsWithCsv {
         // Calculate total execution time in milliseconds
         let total_time_ms = start_time.elapsed().as_millis() as u64;
         
-        // Record metrics
-        self.metrics.transaction_execution_time_histogram.record(total_time_ms as f64);
-        self.metrics.transaction_io_time_histogram.record(io_time_ms as f64);
-        self.metrics.transaction_evm_time_histogram.record(evm_time_ms as f64);
+        // Record the metrics with labels
+        self.metrics.transaction_execution_time.record(total_time_ms as f64);
+        self.metrics.transaction_io_time.record(io_time_ms as f64);
+        self.metrics.transaction_evm_time.record(evm_time_ms as f64);
         self.metrics.transactions_processed_total.increment(1);
-        
-        // Set the latest transaction hash (convert to u64 for gauge)
-        // Using the first 8 bytes as a simple representation
-        let tx_hash_gauge_value = u64::from_be_bytes([
-            tx_hash.0[0], tx_hash.0[1], tx_hash.0[2], tx_hash.0[3],
-            tx_hash.0[4], tx_hash.0[5], tx_hash.0[6], tx_hash.0[7],
-        ]) as f64;
-        self.metrics.latest_transaction_hash.set(tx_hash_gauge_value);
         
         // Log the transaction timing information
         tracing::debug!(
@@ -515,7 +495,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "metrics")]
     fn test_transaction_metrics() {
         let recorder = DebuggingRecorder::new();
         let _snapshotter = recorder.snapshotter();
