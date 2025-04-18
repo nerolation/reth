@@ -50,6 +50,9 @@ pub use alloy_evm::{
 
 pub use alloy_evm::block::state_changes as state_change;
 
+#[cfg(feature = "metrics")]
+use crate::metrics::ExecutorMetrics;
+
 /// A complete configuration of EVM for Reth.
 ///
 /// This trait encapsulates complete configuration required for transaction execution and block
@@ -254,6 +257,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
             assembler: self.block_assembler(),
             parent,
             transactions: Vec::new(),
+            metrics: ExecutorMetrics::default(),
         }
     }
 

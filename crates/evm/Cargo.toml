@@ -19,6 +19,7 @@ reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
+tracing = { workspace = true }
 
 reth-ethereum-primitives = { workspace = true, optional = true }
 
@@ -36,6 +37,7 @@ derive_more.workspace = true
 futures-util.workspace = true
 metrics = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-ethereum-forks.workspace = true
@@ -63,6 +65,7 @@ std = [
     "derive_more/std",
     "reth-storage-api/std",
     "reth-trie-common/std",
+    "serde_json/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [
