@@ -24,6 +24,9 @@ alloy-primitives.workspace = true
 # revm
 revm.workspace = true
 
+# tracing
+tracing.workspace = true
+
 [dev-dependencies]
 reth-trie.workspace = true
 reth-ethereum-forks.workspace = true
