@@ -6,6 +6,7 @@ use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProv
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 use std::time::Instant;
+use tracing::info;
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///
@@ -114,7 +115,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
         let start = Instant::now();
         let result = self.basic_ref(address);
         let elapsed = start.elapsed().as_micros();
-        println!("basic_account_info for {:?} took {} microseconds", address, elapsed);
+        info!("basic_account_info for {:?} took {} microseconds", address, elapsed);
         result
     }
 
@@ -125,7 +126,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
         let start = Instant::now();
         let result = self.code_by_hash_ref(code_hash);
         let elapsed = start.elapsed().as_micros();
-        println!("code_by_hash for {:?} took {} microseconds", code_hash, elapsed);
+        info!("code_by_hash for {:?} took {} microseconds", code_hash, elapsed);
         result
     }
 
@@ -136,7 +137,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
         let start = Instant::now();
         let result = self.storage_ref(address, index);
         let elapsed = start.elapsed().as_micros();
-        println!("storage for {:?} at index {:?} took {} microseconds", address, index, elapsed);
+        info!("storage for {:?} at index {:?} took {} microseconds", address, index, elapsed);
         result
     }
 
@@ -148,7 +149,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
         let start = Instant::now();
         let result = self.block_hash_ref(number);
         let elapsed = start.elapsed().as_micros();
-        println!("block_hash for block {} took {} microseconds", number, elapsed);
+        info!("block_hash for block {} took {} microseconds", number, elapsed);
         result
     }
 }
@@ -164,7 +165,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
         let start = Instant::now();
         let result = Ok(self.basic_account(&address)?.map(Into::into));
         let elapsed = start.elapsed().as_micros();
-        println!("basic_account_info_ref for {:?} took {} microseconds", address, elapsed);
+        info!("basic_account_info_ref for {:?} took {} microseconds", address, elapsed);
         result
     }
 
@@ -175,7 +176,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
         let start = Instant::now();
         let result = Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0);
         let elapsed = start.elapsed().as_micros();
-        println!("code_by_hash_ref for {:?} took {} microseconds", code_hash, elapsed);
+        info!("code_by_hash_ref for {:?} took {} microseconds", code_hash, elapsed);
         result
     }
 
@@ -187,7 +188,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
         let result =
             Ok(self.0.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default());
         let elapsed = start.elapsed().as_micros();
-        println!(
+        info!(
             "storage_ref for {:?} at index {:?} took {} microseconds",
             address, index, elapsed
         );
@@ -202,7 +203,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
         // Get the block hash or default hash with an attempt to convert U256 block number to u64
         let result = Ok(self.0.block_hash(number)?.unwrap_or_default());
         let elapsed = start.elapsed().as_micros();
-        println!("block_hash_ref for block {} took {} microseconds", number, elapsed);
+        info!("block_hash_ref for block {} took {} microseconds", number, elapsed);
         result
     }
 }
