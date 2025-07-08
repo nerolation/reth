@@ -35,7 +35,7 @@ use reth_transaction_pool::{
     ValidPoolTransaction,
 };
 use revm::context_interface::Block as _;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace, warn};
 
 mod config;
@@ -272,8 +272,14 @@ where
             };
         }
 
+        let tx_hash = *tx.hash();
+        let start_time = Instant::now();
         let gas_used = match builder.execute_transaction(tx.clone()) {
-            Ok(gas_used) => gas_used,
+            Ok(gas_used) => {
+                let elapsed = start_time.elapsed();
+                trace!(target: "payload_builder", ?tx_hash, elapsed_micros = elapsed.as_micros(), "Transaction executed");
+                gas_used
+            }
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
             })) => {

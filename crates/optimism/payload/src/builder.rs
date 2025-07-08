@@ -42,7 +42,7 @@ use reth_revm::{
 use reth_storage_api::{errors::ProviderError, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::{Block, BlockEnv};
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
@@ -604,8 +604,14 @@ where
                 PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
             })?;
 
+            let tx_hash = sequencer_tx.tx_hash();
+            let start_time = Instant::now();
             let gas_used = match builder.execute_transaction(sequencer_tx.clone()) {
-                Ok(gas_used) => gas_used,
+                Ok(gas_used) => {
+                    let elapsed = start_time.elapsed();
+                    trace!(target: "payload_builder", ?tx_hash, elapsed_micros = elapsed.as_micros(), "Sequencer transaction executed");
+                    gas_used
+                }
                 Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                     error,
                     ..
@@ -679,8 +685,14 @@ where
                 return Ok(Some(()))
             }
 
+            let tx_hash = tx.tx_hash();
+            let start_time = Instant::now();
             let gas_used = match builder.execute_transaction(tx.clone()) {
-                Ok(gas_used) => gas_used,
+                Ok(gas_used) => {
+                    let elapsed = start_time.elapsed();
+                    trace!(target: "payload_builder", ?tx_hash, elapsed_micros = elapsed.as_micros(), "Transaction executed");
+                    gas_used
+                }
                 Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                     error,
                     ..

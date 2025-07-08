@@ -5,6 +5,7 @@ use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
+use std::time::Instant;
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///
@@ -110,21 +111,33 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.basic_ref(address)
+        let start = Instant::now();
+        let result = self.basic_ref(address);
+        let elapsed = start.elapsed().as_micros();
+        println!("basic_account_info for {:?} took {} microseconds", address, elapsed);
+        result
     }
 
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.code_by_hash_ref(code_hash)
+        let start = Instant::now();
+        let result = self.code_by_hash_ref(code_hash);
+        let elapsed = start.elapsed().as_micros();
+        println!("code_by_hash for {:?} took {} microseconds", code_hash, elapsed);
+        result
     }
 
     /// Retrieves the storage value at a specific index for a given address.
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.storage_ref(address, index)
+        let start = Instant::now();
+        let result = self.storage_ref(address, index);
+        let elapsed = start.elapsed().as_micros();
+        println!("storage for {:?} at index {:?} took {} microseconds", address, index, elapsed);
+        result
     }
 
     /// Retrieves the block hash for a given block number.
@@ -132,7 +145,11 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     /// Note: It safely casts the `number` to `u64`.
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        self.block_hash_ref(number)
+        let start = Instant::now();
+        let result = self.block_hash_ref(number);
+        let elapsed = start.elapsed().as_micros();
+        println!("block_hash for block {} took {} microseconds", number, elapsed);
+        result
     }
 }
 
@@ -144,28 +161,48 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.basic_account(&address)?.map(Into::into))
+        let start = Instant::now();
+        let result = Ok(self.basic_account(&address)?.map(Into::into));
+        let elapsed = start.elapsed().as_micros();
+        println!("basic_account_info_ref for {:?} took {} microseconds", address, elapsed);
+        result
     }
 
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
+        let start = Instant::now();
+        let result = Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0);
+        let elapsed = start.elapsed().as_micros();
+        println!("code_by_hash_ref for {:?} took {} microseconds", code_hash, elapsed);
+        result
     }
 
     /// Retrieves the storage value at a specific index for a given address.
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        Ok(self.0.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default())
+        let start = Instant::now();
+        let result =
+            Ok(self.0.storage(address, B256::new(index.to_be_bytes()))?.unwrap_or_default());
+        let elapsed = start.elapsed().as_micros();
+        println!(
+            "storage_ref for {:?} at index {:?} took {} microseconds",
+            address, index, elapsed
+        );
+        result
     }
 
     /// Retrieves the block hash for a given block number.
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        let start = Instant::now();
         // Get the block hash or default hash with an attempt to convert U256 block number to u64
-        Ok(self.0.block_hash(number)?.unwrap_or_default())
+        let result = Ok(self.0.block_hash(number)?.unwrap_or_default());
+        let elapsed = start.elapsed().as_micros();
+        println!("block_hash_ref for block {} took {} microseconds", number, elapsed);
+        result
     }
 }
