@@ -19,6 +19,7 @@ use revm::{
     state::EvmState,
 };
 use std::time::Instant;
+use tracing::info;
 
 /// Wrapper struct that combines metrics and state hook
 struct MeteredStateHook {
@@ -129,13 +130,19 @@ impl ExecutorMetrics {
             executor.apply_pre_execution_changes()?;
             let block_number = input.header().number();
             for (tx_idx, tx) in input.transactions_recovered().enumerate() {
-                // Log block number and transaction index before execution
-                println!("Executing transaction at index {tx_idx} in block {block_number}");
-
                 // Time individual transaction execution
                 let tx_start = Instant::now();
                 executor.execute_transaction(tx)?;
                 let tx_duration = tx_start.elapsed();
+
+                // Log EVM execution time
+                info!(
+                    target: "reth::evm",
+                    "Finished executing transaction tx_index={} block={} time={} microseconds",
+                    tx_idx,
+                    block_number,
+                    tx_duration.as_micros()
+                );
 
                 // Record transaction execution metrics
                 self.transaction_execution_histogram.record(tx_duration.as_millis() as f64);
