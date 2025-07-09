@@ -19,6 +19,7 @@ use revm::{
     state::EvmState,
 };
 use std::time::Instant;
+use tracing::info;
 
 /// Wrapper struct that combines metrics and state hook
 struct MeteredStateHook {
@@ -72,6 +73,11 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// The Histogram for execution time of individual transactions in milliseconds.
+    pub transaction_execution_histogram: Histogram,
+    /// Counter for number of transactions executed.
+    pub transactions_executed_total: Counter,
 }
 
 impl ExecutorMetrics {
@@ -122,8 +128,25 @@ impl ExecutorMetrics {
         // Use metered to execute and track timing/gas metrics
         let (mut db, result) = self.metered(input, || {
             executor.apply_pre_execution_changes()?;
-            for tx in input.transactions_recovered() {
+            let block_number = input.header().number();
+            for (tx_idx, tx) in input.transactions_recovered().enumerate() {
+                // Time individual transaction execution
+                let tx_start = Instant::now();
                 executor.execute_transaction(tx)?;
+                let tx_duration = tx_start.elapsed();
+
+                // Log EVM execution time
+                info!(
+                    target: "reth::evm",
+                    "Finished executing transaction tx_index={} block={} time={} microseconds",
+                    tx_idx,
+                    block_number,
+                    tx_duration.as_micros()
+                );
+
+                // Record transaction execution metrics
+                self.transaction_execution_histogram.record(tx_duration.as_millis() as f64);
+                self.transactions_executed_total.increment(1);
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         })?;
