@@ -128,14 +128,12 @@ def process_line(line: str, state: dict, fh) -> None:
         microseconds = int(m.group(3))
         evm_time = microseconds / 1000.0  # Convert to ms
         
-        # Calculate net EVM time (total - IO)
-        evm_net = evm_time - current_io
-        
-        # Store the record with a temporary tx_hash (will be replaced if we find actual tx hash)
+        # The logged time is just EVM execution, not including IO
+        # So we store IO time separately and EVM time as-is
         records.append({
             'tx_hash': f'tx_{block_num}_{tx_idx}',  # Temporary identifier
             'IO_time': current_io,
-            'EVM_time': evm_net,
+            'EVM_time': evm_time,  # This is pure EVM time, not total
             'block_number': block_num
         })
         
