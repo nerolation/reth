@@ -49,7 +49,8 @@ PATTERN_BLOCK  = re.compile(r'.*Finished inserting block.*?number\s*:\s*(\d+)')
 # Default parser state keys
 STATE_DEFAULT = {
     'inode': None,
-    'offset': 0
+    'offset': 0,
+    'uploaded_blocks': []  # Track uploaded block numbers
 }
 
 # Convert time unit to ms
@@ -61,21 +62,38 @@ def parse_time(val: str, unit: str) -> float:
 def save_state(path: str, state: dict):
     tmp = f"{path}.tmp"
     with open(tmp, 'w') as f:
-        json.dump({k: state[k] for k in STATE_DEFAULT}, f)
+        # Save all state including uploaded blocks
+        state_to_save = {k: state.get(k, STATE_DEFAULT[k]) for k in STATE_DEFAULT}
+        json.dump(state_to_save, f)
     os.replace(tmp, path)
-    logger.debug(f"State saved: inode={state['inode']} offset={state['offset']}")
+    logger.debug(f"State saved: inode={state['inode']} offset={state['offset']} uploaded_blocks={len(state.get('uploaded_blocks', []))}")
 
 # Load state from disk
 def load_state(path: str) -> dict:
     try:
         with open(path, 'r') as f:
             data = json.load(f)
-        st = {**STATE_DEFAULT, **data}
-        logger.info(f"Loaded state: inode={st['inode']} offset={st['offset']}")
+        # Ensure we have all required keys with defaults
+        st = STATE_DEFAULT.copy()
+        st.update(data)
+        # Ensure uploaded_blocks is a list
+        if not isinstance(st.get('uploaded_blocks'), list):
+            st['uploaded_blocks'] = []
+        logger.info(f"Loaded state: inode={st['inode']} offset={st['offset']} uploaded_blocks={len(st['uploaded_blocks'])}")
         return st
     except Exception:
         logger.info("No valid state file, starting fresh.")
         return STATE_DEFAULT.copy()
+
+# Check if blob exists in GCS
+def check_blob_exists(bucket: str, blob_name: str) -> bool:
+    try:
+        client = storage.Client()
+        blob = client.bucket(bucket).blob(blob_name)
+        return blob.exists()
+    except Exception as e:
+        logger.warning(f"Error checking blob existence: {e}")
+        return False
 
 # Upload DataFrame as Parquet to GCS
 def upload_parquet(df: pd.DataFrame, bucket: str, blob_name: str):
@@ -170,12 +188,38 @@ def process_line(line: str, state: dict, fh) -> None:
     if (m := PATTERN_BLOCK.search(line)):
         blk = int(m.group(1))
         if records:
-            df = pd.DataFrame(records)
-            df['block_number'] = blk
-            blob = f"{blk}.parquet"
-            upload_parquet(df, state['bucket'], blob)
-            logger.info(f"Flushed {len(df)} txs for block {blk}")
-            records.clear()
+            # Check if block was already uploaded
+            if blk in state.get('uploaded_blocks', []):
+                logger.info(f"Block {blk} already uploaded, skipping {len(records)} txs")
+                records.clear()
+            else:
+                df = pd.DataFrame(records)
+                df['block_number'] = blk
+                blob = f"{blk}.parquet"
+                
+                # Double-check in GCS before uploading
+                if check_blob_exists(state['bucket'], blob):
+                    logger.info(f"Block {blk} exists in GCS, skipping upload")
+                    # Add to uploaded_blocks to avoid future checks
+                    if 'uploaded_blocks' not in state:
+                        state['uploaded_blocks'] = []
+                    state['uploaded_blocks'].append(blk)
+                else:
+                    upload_parquet(df, state['bucket'], blob)
+                    logger.info(f"Flushed {len(df)} txs for block {blk}")
+                    # Track this block as uploaded
+                    if 'uploaded_blocks' not in state:
+                        state['uploaded_blocks'] = []
+                    state['uploaded_blocks'].append(blk)
+                    
+                    # Trim the list if it gets too large (keep most recent blocks)
+                    max_blocks = state.get('max_tracked_blocks', 10000)
+                    if len(state['uploaded_blocks']) > max_blocks:
+                        # Keep the most recent blocks
+                        state['uploaded_blocks'] = sorted(state['uploaded_blocks'])[-max_blocks:]
+                        logger.info(f"Trimmed uploaded_blocks list to {max_blocks} most recent blocks")
+                
+                records.clear()
         state['offset'] = fh.tell()
         save_state(state['state_file'], state)
 
@@ -218,13 +262,19 @@ def main():
     p.add_argument('--state-file', default=os.path.expanduser('~/.reth_state.json'))
     p.add_argument('--bucket', default='ethereum-execution-times', help='GCS bucket name')
     p.add_argument('--sleep', type=float, default=1.0)
+    p.add_argument('--max-tracked-blocks', type=int, default=10000, 
+                   help='Maximum number of uploaded blocks to track in memory (default: 10000)')
     args = p.parse_args()
 
     # Set GCP credentials
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = "./google-creds.json"
 
     state = load_state(args.state_file)
-    state.update({'state_file': args.state_file, 'bucket': args.bucket})
+    state.update({
+        'state_file': args.state_file, 
+        'bucket': args.bucket,
+        'max_tracked_blocks': args.max_tracked_blocks
+    })
 
     # Backfill rotated logs on first run
     if state['inode'] is None and state['offset'] == 0:
