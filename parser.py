@@ -16,6 +16,8 @@ import glob
 import argparse
 import tempfile
 import logging
+import signal
+import atexit
 
 import pandas as pd
 from google.cloud import storage
@@ -53,10 +55,40 @@ STATE_DEFAULT = {
     'uploaded_blocks': []  # Track uploaded block numbers
 }
 
+# Default location for uploaded blocks file
+UPLOADED_BLOCKS_FILE = '/tmp/reth_uploaded_blocks.json'
+
 # Convert time unit to ms
 def parse_time(val: str, unit: str) -> float:
     x = float(val)
     return x / 1000.0 if unit == 'µs' else x
+
+# Load uploaded blocks from tmp file
+def load_uploaded_blocks(path: str = UPLOADED_BLOCKS_FILE) -> list:
+    try:
+        with open(path, 'r') as f:
+            blocks = json.load(f)
+        if isinstance(blocks, list):
+            logger.info(f"Loaded {len(blocks)} uploaded blocks from {path}")
+            return blocks
+    except Exception as e:
+        logger.info(f"No uploaded blocks file found or error loading: {e}")
+    return []
+
+# Save uploaded blocks to tmp file
+def save_uploaded_blocks(blocks: list, path: str = UPLOADED_BLOCKS_FILE, max_blocks: int = 10000):
+    try:
+        # Keep only the most recent blocks
+        if len(blocks) > max_blocks:
+            blocks = sorted(blocks)[-max_blocks:]
+        
+        tmp = f"{path}.tmp"
+        with open(tmp, 'w') as f:
+            json.dump(blocks, f)
+        os.replace(tmp, path)
+        logger.info(f"Saved {len(blocks)} uploaded blocks to {path}")
+    except Exception as e:
+        logger.error(f"Failed to save uploaded blocks: {e}")
 
 # Save state to disk
 def save_state(path: str, state: dict):
@@ -204,6 +236,8 @@ def process_line(line: str, state: dict, fh) -> None:
                     if 'uploaded_blocks' not in state:
                         state['uploaded_blocks'] = []
                     state['uploaded_blocks'].append(blk)
+                    # Save to tmp file
+                    save_uploaded_blocks(state['uploaded_blocks'], max_blocks=state.get('max_tracked_blocks', 10000))
                 else:
                     upload_parquet(df, state['bucket'], blob)
                     logger.info(f"Flushed {len(df)} txs for block {blk}")
@@ -218,6 +252,9 @@ def process_line(line: str, state: dict, fh) -> None:
                         # Keep the most recent blocks
                         state['uploaded_blocks'] = sorted(state['uploaded_blocks'])[-max_blocks:]
                         logger.info(f"Trimmed uploaded_blocks list to {max_blocks} most recent blocks")
+                    
+                    # Save uploaded blocks to tmp file periodically
+                    save_uploaded_blocks(state['uploaded_blocks'], max_blocks=max_blocks)
                 
                 records.clear()
         state['offset'] = fh.tell()
@@ -275,6 +312,32 @@ def main():
         'bucket': args.bucket,
         'max_tracked_blocks': args.max_tracked_blocks
     })
+    
+    # Load uploaded blocks from tmp file
+    uploaded_blocks = load_uploaded_blocks()
+    if uploaded_blocks:
+        # Merge with existing uploaded blocks in state
+        existing = set(state.get('uploaded_blocks', []))
+        existing.update(uploaded_blocks)
+        state['uploaded_blocks'] = sorted(list(existing))[-args.max_tracked_blocks:]
+        logger.info(f"Merged uploaded blocks, total: {len(state['uploaded_blocks'])}")
+    
+    # Set up exit handlers to save uploaded blocks
+    def cleanup():
+        logger.info("Saving uploaded blocks before exit...")
+        save_uploaded_blocks(state.get('uploaded_blocks', []), max_blocks=args.max_tracked_blocks)
+        save_state(state['state_file'], state)
+    
+    # Register cleanup on exit
+    atexit.register(cleanup)
+    
+    # Handle signals for clean shutdown
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down...")
+        raise KeyboardInterrupt()
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     # Backfill rotated logs on first run
     if state['inode'] is None and state['offset'] == 0:
