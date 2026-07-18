@@ -85,7 +85,7 @@ pub enum EthApiError {
     /// requested that has been pruned according to the node's data retention policy.
     ///
     /// See also <https://eips.ethereum.org/EIPS/eip-4444>
-    #[error("pruned history unavailable")]
+    #[error("Pruned history unavailable")]
     PrunedHistoryUnavailable,
     /// Receipts not found for block hash/number/tag
     #[error("receipts not found")]
@@ -208,7 +208,7 @@ pub enum EthApiError {
         error: jsonrpsee_types::ErrorObject<'static>,
     },
     /// Error thrown when trying to access block access list for blocks before Amsterdam
-    #[error("Block access list not available for pre-Amsterdam blocks")]
+    #[error("Resource not found")]
     BlockAccessListNotAvailablePreAmsterdam,
     /// Any other error
     #[error("{0}")]
@@ -349,7 +349,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 )
             }
             EthApiError::BlockAccessListNotAvailablePreAmsterdam => {
-                rpc_error_with_code(4445, error.to_string())
+                rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
         }
     }

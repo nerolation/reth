@@ -1,8 +1,9 @@
-//! Helpers for `eth_blockAccessList` RPC method.
+//! Helpers for the `eth_getBlockAccessList` and `debug_getRawBlockAccessList` RPC methods.
 use alloy_consensus::BlockHeader;
 use alloy_eip7928::{bal::DecodedBal, BlockAccessList};
 use alloy_primitives::Bytes;
 use alloy_rpc_types_eth::BlockId;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{block::BlockExecutor, ConfigureEvm, Evm};
 use reth_revm::{database::StateProviderDatabase, State};
@@ -16,18 +17,24 @@ use crate::{
     RpcNodeCore, RpcNodeCoreExt,
 };
 
-/// Helper trait for `eth_blockAccessList` RPC method.
+/// Helper trait for the `eth_getBlockAccessList` and `debug_getRawBlockAccessList` RPC methods.
 pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
-    /// Retrieves the block access list for a block identified by its hash.
+    /// Retrieves the block access list for the given block.
+    ///
+    /// Returns `None` if the block does not exist. Requesting a known pre-Amsterdam block is an
+    /// error because block access lists are only defined from the Amsterdam hardfork onwards.
     fn get_block_access_list(
         &self,
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<BlockAccessList>, Self::Error>> + Send {
         async move {
-            let block = self
-                .recovered_block(block_id)
-                .await?
-                .ok_or_else(|| EthApiError::HeaderNotFound(block_id))?;
+            let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
+
+            // Gate before touching cache or re-executing: pre-Amsterdam blocks have no block
+            // access list and must not be re-executed to synthesize one.
+            if !self.provider().chain_spec().is_amsterdam_active_at_timestamp(block.timestamp()) {
+                return Err(EthApiError::BlockAccessListNotAvailablePreAmsterdam.into())
+            }
 
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
@@ -70,17 +77,20 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 let bal = db.take_built_alloy_bal();
-                Ok(bal)
+                Ok(Some(bal.unwrap_or_default()))
             })
             .await
         }
     }
 
     /// Retrieves the raw RLP-encoded block access list for a block.
+    ///
+    /// Unlike [`Self::get_block_access_list`] an unknown block is an error, and an empty block
+    /// access list is encoded as `0xc0`.
     fn get_raw_block_access_list(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Bytes>, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         async move {
             let block = self
                 .recovered_block(block_id)
@@ -90,10 +100,11 @@ pub trait GetBlockAccessList: Trace + Call + LoadBlock + RpcNodeCoreExt {
             if let Some(cached_bal) =
                 self.cache().get_bal(block.hash()).await.map_err(Self::Error::from_eth_err)?
             {
-                return Ok(Some(cached_bal.as_raw().clone()))
+                return Ok(cached_bal.as_raw().clone())
             }
 
-            Ok(self.get_block_access_list(block_id).await?.map(|bal| alloy_rlp::encode(bal).into()))
+            let bal = self.get_block_access_list(block_id).await?.unwrap_or_default();
+            Ok(alloy_rlp::encode(bal).into())
         }
     }
 }

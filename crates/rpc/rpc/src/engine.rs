@@ -147,26 +147,8 @@ where
         self.eth.get_proof(address, keys, block_number).instrument(engine_span!()).await
     }
 
-    /// Handler for `eth_getBlockAccessListByBlockHash`
-    async fn block_access_list_by_block_hash(&self, hash: B256) -> Result<Option<Value>> {
-        self.eth.block_access_list_by_block_hash(hash).instrument(engine_span!()).await
-    }
-
-    /// Handler for `eth_getBlockAccessListByBlockNumber`
-    async fn block_access_list_by_block_number(
-        &self,
-        block_number: BlockNumberOrTag,
-    ) -> Result<Option<Value>> {
-        self.eth.block_access_list_by_block_number(block_number).instrument(engine_span!()).await
-    }
-
     /// Handler for `eth_getBlockAccessList`
     async fn block_access_list(&self, block_id: BlockId) -> Result<Option<Value>> {
         self.eth.block_access_list(block_id).instrument(engine_span!()).await
-    }
-
-    /// Handler for `getBlockAccessListRaw`
-    async fn block_access_list_raw(&self, block: BlockId) -> Result<Option<Bytes>> {
-        self.eth.block_access_list_raw(block).instrument(engine_span!()).await
     }
 }

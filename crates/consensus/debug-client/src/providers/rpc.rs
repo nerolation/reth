@@ -1,6 +1,7 @@
 use crate::PayloadProvider;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
+use alloy_primitives::Bytes;
 use alloy_provider::{
     network::{primitives::HeaderResponse, BlockResponse, Network},
     ConnectionConfig, Provider, ProviderBuilder, WebSocketConfig,
@@ -82,7 +83,7 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
     /// Fetches optional payload side data for blocks that advertise a block access list hash.
     ///
     /// Block access lists are best effort here: RPC providers may not support
-    /// `eth_getBlockAccessListByHash`, so failed or missing responses fall back to empty extras.
+    /// `debug_getRawBlockAccessList`, so failed or missing responses fall back to empty extras.
     async fn payload_extras(&self, header: &N::HeaderResponse) -> PayloadExtras {
         if !self.fetch_block_access_list {
             return PayloadExtras::default()
@@ -95,7 +96,8 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
 
         let block_access_list = self
             .provider
-            .get_block_access_list_raw(BlockId::from(block_hash))
+            .client()
+            .request::<_, Bytes>("debug_getRawBlockAccessList", (BlockId::from(block_hash),))
             .await
             .inspect_err(|err| {
                 warn!(
@@ -106,8 +108,7 @@ impl<N: Network, ExecutionData> RpcBlockProvider<N, ExecutionData> {
                     "Failed to fetch block access list",
                 );
             })
-            .ok()
-            .flatten();
+            .ok();
 
         PayloadExtras::from(block_access_list)
     }

@@ -36,6 +36,13 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "getRawReceipts")]
     async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>>;
 
+    /// Returns the RLP-encoded EIP-7928 block access list for the given block.
+    ///
+    /// An empty block access list is encoded as `0xc0`. Unknown or pre-Amsterdam blocks are
+    /// errors.
+    #[method(name = "getRawBlockAccessList")]
+    async fn raw_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes>;
+
     /// Returns an array of recent bad blocks that the client has seen on the network.
     #[method(name = "getBadBlocks")]
     async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>>;

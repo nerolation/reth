@@ -813,6 +813,11 @@ where
             .collect())
     }
 
+    /// Handler for `debug_getRawBlockAccessList`
+    async fn raw_block_access_list(&self, block_id: BlockId) -> RpcResult<Bytes> {
+        self.eth_api().get_raw_block_access_list(block_id).await.map_err(Into::into)
+    }
+
     /// Handler for `debug_getBadBlocks`
     async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>> {
         let entries = self.inner.bad_block_store.all();

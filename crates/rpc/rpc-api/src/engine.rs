@@ -422,22 +422,9 @@ pub trait EngineEthApi<TxReq: RpcObject, B: RpcObject, R: RpcObject> {
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse>;
 
-    /// Returns the EIP-7928 block access list for a block by hash.
-    #[method(name = "getBlockAccessListByBlockHash")]
-    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Value>>;
-
-    /// Returns the EIP-7928 block access list for a block by number.
-    #[method(name = "getBlockAccessListByBlockNumber")]
-    async fn block_access_list_by_block_number(
-        &self,
-        number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Value>>;
-
     /// Returns the EIP-7928 block access list for a block by block id.
+    ///
+    /// Returns `null` if the block does not exist.
     #[method(name = "getBlockAccessList")]
     async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
-
-    /// Returns the EIP-7928 block access list bytes for a block by number.
-    #[method(name = "getBlockAccessListRaw")]
-    async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }

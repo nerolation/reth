@@ -12,6 +12,7 @@
 use url as _;
 
 pub mod block;
+pub mod block_access_list;
 pub mod builder;
 pub mod cache;
 pub mod capabilities;
@@ -29,6 +30,9 @@ pub mod utils;
 
 pub use alloy_rpc_types_eth::FillTransaction;
 pub use block::CachedTransaction;
+pub use block_access_list::{
+    AccountAccess, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+};
 pub use builder::config::{EthConfig, EthFilterConfig};
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,

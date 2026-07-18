@@ -18,7 +18,7 @@ use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_types::{EthApiError, EthCapabilities, FillTransaction};
+use reth_rpc_eth_types::{AccountAccess, EthApiError, EthCapabilities, FillTransaction};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -425,24 +425,11 @@ pub trait EthApi<
         block: BlockId,
     ) -> RpcResult<alloy_rpc_types_eth::AccountInfo>;
 
-    /// Returns the EIP-7928 block access list for a block by hash.
-    #[method(name = "getBlockAccessListByBlockHash")]
-    async fn block_access_list_by_block_hash(&self, hash: B256) -> RpcResult<Option<Value>>;
-
-    /// Returns the EIP-7928 block access list for a block by number.
-    #[method(name = "getBlockAccessListByBlockNumber")]
-    async fn block_access_list_by_block_number(
-        &self,
-        number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Value>>;
-
     /// Returns the EIP-7928 block access list for a given block id.
+    ///
+    /// Returns `null` if the block does not exist.
     #[method(name = "getBlockAccessList")]
     async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>>;
-
-    /// Returns the EIP-7928 block access list bytes for a block by number.
-    #[method(name = "getBlockAccessListRaw")]
-    async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>>;
 }
 
 #[async_trait::async_trait]
@@ -964,46 +951,15 @@ where
         Ok(EthState::get_account_info(self, address, block).await?)
     }
 
-    /// Handler for: `eth_getBlockAccessListByBlockHash`
-    async fn block_access_list_by_block_hash(&self, block_hash: B256) -> RpcResult<Option<Value>> {
-        trace!(target: "rpc::eth", ?block_hash, "Serving eth_getBlockAccessListByBlockHash");
-
-        let bal = self.get_block_access_list(block_hash.into()).await?;
-        let json = serde_json::to_value(&bal)
-            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
-
-        Ok(Some(json))
-    }
-
-    /// Handler for: `eth_getBlockAccessListByBlockNumber`
-    async fn block_access_list_by_block_number(
-        &self,
-        number: BlockNumberOrTag,
-    ) -> RpcResult<Option<Value>> {
-        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockAccessListByBlockNumber");
-
-        let bal = self.get_block_access_list(number.into()).await?;
-        let json = serde_json::to_value(&bal)
-            .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
-
-        Ok(Some(json))
-    }
-
     /// Handler for: `eth_getBlockAccessList`
     async fn block_access_list(&self, block_id: BlockId) -> RpcResult<Option<Value>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockAccessList");
 
-        let bal = self.get_block_access_list(block_id).await?;
-        let json = serde_json::to_value(&bal)
+        let Some(bal) = self.get_block_access_list(block_id).await? else { return Ok(None) };
+        let bal = bal.into_iter().map(AccountAccess::from).collect::<Vec<_>>();
+        let json = serde_json::to_value(bal)
             .map_err(|e| EthApiError::Internal(reth_errors::RethError::msg(e.to_string())))?;
 
         Ok(Some(json))
-    }
-
-    /// Handler for: `eth_getBlockAccessListRaw`
-    async fn block_access_list_raw(&self, block: BlockId) -> RpcResult<Option<Bytes>> {
-        trace!(target: "rpc::eth", ?block, "Serving eth_getBlockAccessListRaw");
-
-        Ok(self.get_raw_block_access_list(block).await?)
     }
 }
