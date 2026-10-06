@@ -61,9 +61,11 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
 ///
 /// * If V2, this ensures that the payload timestamp is pre-Cancun.
 /// * If V3, this ensures that the payload timestamp is within the Cancun timestamp.
-/// * If V4, this ensures that the payload timestamp is within the Prague timestamp.
-/// * If V5, this ensures that the payload timestamp is within the Osaka timestamp, and within the
-///   Bogota timestamp for `engine_forkchoiceUpdatedV5` payload attributes.
+/// * If V4, this ensures that the payload timestamp is within the Prague timestamp, and within the
+///   Amsterdam timestamp for `engine_forkchoiceUpdatedV4` payload attributes.
+/// * If V5, this ensures that the payload timestamp is within the Osaka timestamp, within the
+///   Amsterdam timestamp for `engine_newPayloadV5` payloads, and within the Bogota timestamp for
+///   `engine_forkchoiceUpdatedV5` payload attributes.
 /// * If V6, this ensures that the payload timestamp is within the Amsterdam timestamp, and within
 ///   the Bogota timestamp for `engine_newPayloadV6` payloads.
 ///
@@ -188,6 +190,28 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
+    if !is_amsterdam &&
+        matches!(
+            (version, kind),
+            (EngineApiMessageVersion::V4, MessageValidationKind::PayloadAttributes) |
+                (EngineApiMessageVersion::V5, MessageValidationKind::Payload)
+        )
+    {
+        // From the Engine API spec:
+        // <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md>
+        //
+        // For `engine_newPayloadV5`:
+        //
+        // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
+        //    payload does not fall within the time frame of the Amsterdam fork.
+        //
+        // For `engine_forkchoiceUpdatedV4`:
+        //
+        // 2. `payloadAttributes.timestamp` does not fall within the time frame of the Amsterdam
+        //    fork, return -38005: Unsupported fork on failure.
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
+
     let is_bogota = chain_spec.is_bogota_active_at_timestamp(timestamp);
 
     // Staggered endpoint upgrades must reject Bogota payloads until the Bogota-specific method
@@ -238,7 +262,8 @@ pub fn validate_payload_timestamp(
 
 /// Validates the presence of the `block access lists` field according to the payload timestamp.
 /// After Amsterdam, block access list field must be [Some].
-/// Before Amsterdam, block access list field must be [None];
+/// Before Amsterdam, block access list field must be [None]; the Amsterdam method versions return
+/// [`EngineObjectValidationError::UnsupportedFork`] regardless of the field.
 pub fn validate_block_access_list_presence<T: EthereumHardforks>(
     chain_spec: &T,
     version: EngineApiMessageVersion,
@@ -264,9 +289,9 @@ pub fn validate_block_access_list_presence<T: EthereumHardforks>(
                     return Err(message_validation_kind
                         .to_error(VersionSpecificValidationError::NoBlockAccessListPostAmsterdam))
                 }
-                if !is_amsterdam_active && has_block_access_list {
-                    return Err(message_validation_kind
-                        .to_error(VersionSpecificValidationError::HasBlockAccessListPreAmsterdam))
+                if !is_amsterdam_active {
+                    // `engine_newPayloadV5` MUST reject payloads outside the Amsterdam fork
+                    return Err(EngineObjectValidationError::UnsupportedFork)
                 }
             } else if has_block_access_list {
                 return Err(message_validation_kind
@@ -279,9 +304,8 @@ pub fn validate_block_access_list_presence<T: EthereumHardforks>(
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoBlockAccessListPostAmsterdam))
             }
-            if !is_amsterdam_active && has_block_access_list {
-                return Err(message_validation_kind
-                    .to_error(VersionSpecificValidationError::HasBlockAccessListPreAmsterdam))
+            if !is_amsterdam_active {
+                return Err(EngineObjectValidationError::UnsupportedFork)
             }
         }
     };
@@ -311,13 +335,11 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
 
         EngineApiMessageVersion::V4 => {
             if message_validation_kind == MessageValidationKind::PayloadAttributes {
+                // pre-Amsterdam `engine_forkchoiceUpdatedV4` attributes are rejected by
+                // [`validate_payload_timestamp`] with `-38005: Unsupported fork`
                 if is_amsterdam_active && !has_slot_number {
                     return Err(message_validation_kind
                         .to_error(VersionSpecificValidationError::NoSlotNumberPostAmsterdam))
-                }
-                if !is_amsterdam_active && has_slot_number {
-                    return Err(message_validation_kind
-                        .to_error(VersionSpecificValidationError::HasSlotNumberPreAmsterdam))
                 }
             } else if has_slot_number {
                 return Err(message_validation_kind
@@ -355,6 +377,30 @@ pub fn validate_slot_number_presence<T: EthereumHardforks>(
             }
         }
     };
+
+    Ok(())
+}
+
+/// Validates the presence of the `target gas limit` field according to the payload attributes
+/// timestamp.
+/// After Amsterdam, target gas limit field must be [Some].
+pub fn validate_target_gas_limit_presence<T: EthereumHardforks>(
+    chain_spec: &T,
+    version: EngineApiMessageVersion,
+    message_validation_kind: MessageValidationKind,
+    timestamp: u64,
+    has_target_gas_limit: bool,
+) -> Result<(), EngineObjectValidationError> {
+    if message_validation_kind != MessageValidationKind::PayloadAttributes {
+        return Ok(())
+    }
+
+    let is_amsterdam_active = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
+
+    if version >= EngineApiMessageVersion::V4 && is_amsterdam_active && !has_target_gas_limit {
+        return Err(message_validation_kind
+            .to_error(VersionSpecificValidationError::NoTargetGasLimitPostAmsterdam))
+    }
 
     Ok(())
 }
@@ -578,6 +624,17 @@ where
         payload_or_attrs.slot_number().is_some(),
     )?;
 
+    // target gas limit only exists in PayloadAttributes
+    if let PayloadOrAttributes::PayloadAttributes(_) = payload_or_attrs {
+        validate_target_gas_limit_presence(
+            chain_spec,
+            version,
+            payload_or_attrs.message_validation_kind(),
+            payload_or_attrs.timestamp(),
+            payload_or_attrs.target_gas_limit().is_some(),
+        )?;
+    }
+
     validate_withdrawals_presence(
         chain_spec,
         version,
@@ -724,6 +781,8 @@ pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
+    use alloy_rpc_types_engine::{ExecutionData, PayloadAttributes as EthPayloadAttributes};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition};
 
@@ -881,6 +940,99 @@ mod tests {
             EngineApiMessageVersion::V6,
             0,
             MessageValidationKind::GetPayload,
+        );
+        assert_matches!(res, Ok(()));
+    }
+
+    #[test]
+    fn validate_amsterdam_fork_timeframe() {
+        // Osaka active, Amsterdam not scheduled: the Amsterdam-specific methods must reject
+        let chain_spec = ChainSpecBuilder::mainnet().osaka_activated().build();
+
+        // `engine_forkchoiceUpdatedV4` requires Amsterdam payload attributes
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V4,
+            0,
+            MessageValidationKind::PayloadAttributes,
+        );
+        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+
+        // `engine_newPayloadV5` requires an Amsterdam timestamp
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            0,
+            MessageValidationKind::Payload,
+        );
+        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+
+        // the fork check wins over the block access list presence check
+        let res = validate_block_access_list_presence(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            MessageValidationKind::Payload,
+            0,
+            true,
+        );
+        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+
+        // the Osaka methods remain valid pre-Amsterdam
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V5,
+            0,
+            MessageValidationKind::GetPayload,
+        );
+        assert_matches!(res, Ok(()));
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V4,
+            0,
+            MessageValidationKind::Payload,
+        );
+        assert_matches!(res, Ok(()));
+    }
+
+    #[test]
+    fn validate_fcu_v4_attributes_fork_and_target_gas_limit() {
+        let attributes = EthPayloadAttributes {
+            timestamp: 0,
+            withdrawals: Some(Vec::new()),
+            parent_beacon_block_root: Some(B256::ZERO),
+            slot_number: Some(1),
+            target_gas_limit: None,
+            ..Default::default()
+        };
+
+        // pre-Amsterdam attributes are rejected with `-38005` even though a slot number is set
+        let chain_spec = ChainSpecBuilder::mainnet().osaka_activated().build();
+        let res = validate_version_specific_fields(
+            &chain_spec,
+            EngineApiMessageVersion::V4,
+            PayloadOrAttributes::<'_, ExecutionData, _>::from_attributes(&attributes),
+        );
+        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+
+        // Amsterdam attributes without a target gas limit are rejected with `-38003`
+        let chain_spec = ChainSpecBuilder::mainnet().amsterdam_activated().build();
+        let res = validate_version_specific_fields(
+            &chain_spec,
+            EngineApiMessageVersion::V4,
+            PayloadOrAttributes::<'_, ExecutionData, _>::from_attributes(&attributes),
+        );
+        assert_matches!(
+            res,
+            Err(EngineObjectValidationError::PayloadAttributes(
+                VersionSpecificValidationError::NoTargetGasLimitPostAmsterdam
+            ))
+        );
+
+        let attributes = EthPayloadAttributes { target_gas_limit: Some(30_000_000), ..attributes };
+        let res = validate_version_specific_fields(
+            &chain_spec,
+            EngineApiMessageVersion::V4,
+            PayloadOrAttributes::<'_, ExecutionData, _>::from_attributes(&attributes),
         );
         assert_matches!(res, Ok(()));
     }

@@ -127,7 +127,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     VersionSpecificValidationError::NoBlockAccessListPostAmsterdam |
                     VersionSpecificValidationError::HasSlotNumberPreAmsterdam |
                     VersionSpecificValidationError::NoSlotNumberPostAmsterdam |
-                    VersionSpecificValidationError::SlotNumberNotSupported,
+                    VersionSpecificValidationError::SlotNumberNotSupported |
+                    VersionSpecificValidationError::NoTargetGasLimitPostAmsterdam,
                 ),
             ) |
             EngineApiError::UnexpectedRequestsHash => {
@@ -348,6 +349,17 @@ mod tests {
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::PayloadAttributes(
                     VersionSpecificValidationError::HasWithdrawalsPreShanghai,
+                ),
+            ),
+        );
+
+        // Missing Amsterdam `targetGasLimit` on PayloadAttributes is reported as -38003.
+        ensure_engine_rpc_error(
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+            INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+            EngineApiError::EngineObjectValidationError(
+                EngineObjectValidationError::PayloadAttributes(
+                    VersionSpecificValidationError::NoTargetGasLimitPostAmsterdam,
                 ),
             ),
         );

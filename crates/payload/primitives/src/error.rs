@@ -148,6 +148,10 @@ pub enum VersionSpecificValidationError {
     /// before Amsterdam
     #[error("slot number pre-Amsterdam")]
     HasSlotNumberPreAmsterdam,
+    /// Thrown if `engine_forkchoiceUpdated` contains no target gas limit
+    /// after Amsterdam
+    #[error("no target gas limit post-Amsterdam")]
+    NoTargetGasLimitPostAmsterdam,
 }
 
 /// Error validating payload received over `newPayload` API.
