@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     persistence::PersistenceAction,
     tree::{
-        error::{BlockAccessListDecodeError, InsertBlockErrorKind},
+        error::{BlockAccessListDecodeError, InsertBlockErrorKind, InsertPayloadError},
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
         PersistTarget, TreeConfig,
@@ -10,11 +10,11 @@ use crate::{
 };
 use reth_storage_overlay::OverlayManager;
 
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::{bal::DecodedBal, AccountChanges, Bal};
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
     map::{B256Map, B256Set},
-    Bytes, B256,
+    Address, Bytes, B256,
 };
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
@@ -596,6 +596,43 @@ fn block_access_list_decode_returns_invalid_with_null_latest_valid_hash() {
         )),
     );
     let status = test_harness.tree.on_insert_block_error(error).unwrap();
+    assert!(status.is_invalid());
+    assert_eq!(status.latest_valid_hash, None);
+}
+
+#[test]
+fn block_access_list_structure_returns_invalid_with_null_latest_valid_hash() {
+    let s = include_str!("../../test-data/holesky/1.rlp");
+    let data = Bytes::from_str(s).unwrap();
+    let block = Block::decode(&mut data.as_ref()).unwrap().seal_slow();
+
+    // decodable, but the accounts are not in ascending address order
+    let bal = Bal::new(vec![
+        AccountChanges::new(Address::repeat_byte(0x02)),
+        AccountChanges::new(Address::repeat_byte(0x01)),
+    ]);
+    let raw_bal = RawBal::from(Bytes::from(alloy_rlp::encode(&bal)));
+
+    let mut test_harness = ValidatorTestHarness::new(HOLESKY.clone());
+    test_harness
+        .harness
+        .provider
+        .add_header(HOLESKY.genesis_hash(), HOLESKY.genesis_header().clone());
+
+    let ctx = TreeCtx::new(
+        &mut test_harness.harness.tree.state,
+        &test_harness.harness.tree.canonical_in_memory_state,
+    );
+    let error = test_harness
+        .validator
+        .validate_block(SealedBlockWithAccessList::new(block, Some(raw_bal)), ctx)
+        .unwrap_err();
+    let InsertPayloadError::Block(error) = error else {
+        panic!("expected a block insertion error, got {error:?}")
+    };
+    assert_matches!(error.kind(), InsertBlockErrorKind::BlockAccessListDecode(_));
+
+    let status = test_harness.harness.tree.on_insert_block_error(error).unwrap();
     assert!(status.is_invalid());
     assert_eq!(status.latest_valid_hash, None);
 }

@@ -592,6 +592,12 @@ where
                 .as_bal()
                 .validate_gas_limit(input.gas_limit())
                 .map_err(ConsensusError::from));
+            // Reject mis-ordered, duplicated or out-of-range BAL entries before executing the
+            // block.
+            ensure_ok!(decoded_bal
+                .as_bal()
+                .validate_structure(input.transaction_count())
+                .map_err(BlockAccessListDecodeError::new));
         }
 
         let env = ExecutionEnv {
