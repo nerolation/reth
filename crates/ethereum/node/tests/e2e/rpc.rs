@@ -122,9 +122,36 @@ async fn test_block_access_list_lookup_semantics() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_block_access_list_pre_amsterdam() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+    let tx = provider
+        .send_transaction(TransactionRequest::default().to(Address::ZERO).value(U256::from(1)))
+        .await?;
+    node.advance_block().await?;
+    let block_hash = tx.get_receipt().await?.block_hash.unwrap();
+    let client = node.rpc_client().unwrap();
+
+    for method in ["eth_getBlockAccessList", "debug_getRawBlockAccessList"] {
+        let error =
+            client.request::<serde_json::Value, _>(method, (block_hash,)).await.unwrap_err();
+        let jsonrpsee::core::client::Error::Call(error) = error else {
+            panic!("expected a resource not found error, got {error:?}")
+        };
+        assert_eq!(error.code(), EthRpcErrorCode::ResourceNotFound.code());
+        assert_eq!(error.message(), "Block access list not available for pre-Amsterdam blocks");
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_bal_prewarming_for_transaction_replay() -> eyre::Result<()> {
     for (cache_computed, prewarm) in [(false, false), (true, false), (false, true)] {
-        let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
             .with_node_config_modifier(move |mut config| {
                 config.rpc.rpc_state_cache.cache_computed_bals = cache_computed;
                 config.rpc.rpc_state_cache.prewarm_bals = prewarm.then_some(0);
